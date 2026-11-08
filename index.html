@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ベチョベチョ！スライムパズル</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800;900&display=swap" rel="stylesheet">
+    <!-- Matter.js Physics Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden;
+            color: #f8fafc;
+        }
+        .slime-card {
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(12px);
+            border: 2px solid #6366f1;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .btn-bounce {
+            transition: transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 0.2s;
+        }
+        .btn-bounce:active {
+            transform: scale(0.92);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center p-2 sm:p-4 select-none">
+
+    <header class="w-full max-w-lg flex justify-between items-center mb-1 z-10 gap-1">
+        <div class="flex items-center gap-1.5">
+            <span class="text-xl sm:text-2xl font-black text-indigo-400 drop-shadow-md flex items-center gap-1">
+                💧 スライムパズル
+            </span>
+        </div>
+        <div class="flex items-center gap-1.5">
+            <!-- Difficulty Selector (Horizontal layout) -->
+            <div class="bg-slate-800 p-0.5 rounded-2xl border border-indigo-500/50 flex flex-row gap-0.5 text-[10px] sm:text-xs font-bold">
+                <button id="diffNormalBtn" class="px-2.5 py-1 rounded-xl bg-indigo-600 text-white transition-all">Normal</button>
+                <button id="diffHardBtn" class="px-2.5 py-1 rounded-xl text-indigo-300 hover:text-white transition-all">Hard</button>
+            </div>
+            <button id="restartBtn" class="btn-bounce bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl shadow-md border border-indigo-400 flex items-center gap-1 text-xs sm:text-sm">
+                <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> リセット
+            </button>
+        </div>
+    </header>
+
+    <main class="w-full max-w-lg flex-1 flex flex-col items-center justify-center gap-2 relative">
+        
+        <!-- Score, Timer & Next Slime Cards -->
+        <div class="w-full flex justify-between items-center gap-1.5 z-10">
+            <div class="slime-card flex-1 p-1.5 sm:p-2.5 rounded-2xl text-center">
+                <div class="text-[10px] sm:text-xs font-bold text-indigo-300">スコア</div>
+                <div id="scoreText" class="text-xl sm:text-2xl font-black text-indigo-100">0</div>
+            </div>
+
+            <!-- Timer Card (Fixed 15 min limit) -->
+            <div id="timerCard" class="slime-card flex-1 p-1.5 sm:p-2.5 rounded-2xl text-center transition-colors">
+                <div class="text-[10px] sm:text-xs font-bold text-indigo-300 flex items-center justify-center gap-1">
+                    <i data-lucide="timer" class="w-3 h-3 text-indigo-300"></i>
+                    <span>残り時間</span>
+                </div>
+                <div id="timerText" class="text-xl sm:text-2xl font-black text-indigo-100">15:00</div>
+            </div>
+
+            <div class="slime-card flex-1 p-1.5 sm:p-2.5 rounded-2xl text-center">
+                <div class="text-[10px] sm:text-xs font-bold text-indigo-300">ベスト</div>
+                <div id="bestScoreText" class="text-xl sm:text-2xl font-black text-indigo-100">0</div>
+            </div>
+
+            <div class="slime-card w-20 sm:w-24 p-1 rounded-2xl flex flex-col items-center justify-center">
+                <div class="text-[10px] sm:text-xs font-bold text-indigo-300 mb-0.5">つぎ</div>
+                <div class="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center">
+                    <canvas id="nextCanvas" width="40" height="40"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Box Container -->
+        <div id="gameContainer" class="relative w-full aspect-[3/4] max-h-[62vh] flex justify-center items-center rounded-3xl overflow-hidden shadow-2xl border-4 border-indigo-600 bg-slate-900/80">
+            <!-- Game Canvas -->
+            <canvas id="gameCanvas" class="w-full h-full block cursor-pointer"></canvas>
+
+            <!-- Danger Warning Overlay -->
+            <div id="dangerNotice" class="hidden absolute top-8 left-0 right-0 text-center pointer-events-none animate-bounce">
+                <span class="bg-rose-600/90 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg border border-rose-400">⚠️ あふれちゃう！</span>
+            </div>
+
+            <!-- Game Over / Time Up Overlay -->
+            <div id="gameOverModal" class="hidden absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center z-20 p-4 text-center">
+                <div class="bg-slate-900 rounded-3xl p-6 shadow-2xl max-w-xs w-full border-2 border-indigo-500 flex flex-col items-center">
+                    <div id="modalIcon" class="text-5xl mb-2">🫠</div>
+                    <h2 id="modalTitle" class="text-2xl font-black text-indigo-200 mb-1">ゲームオーバー</h2>
+                    <p id="modalSubtext" class="text-sm font-bold text-slate-400 mb-4">スライムがあふれ出しました！</p>
+                    
+                    <div class="w-full bg-slate-800/80 rounded-2xl p-3 mb-4 text-center border border-indigo-500/30">
+                        <div class="text-xs text-indigo-300 font-bold">最終スコア</div>
+                        <div id="finalScore" class="text-3xl font-black text-indigo-100">0</div>
+                    </div>
+
+                    <button id="modalRestartBtn" class="btn-bounce w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-3 rounded-2xl shadow-lg border-b-4 border-indigo-800 text-lg">
+                        もう一度遊ぶ
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="w-full max-w-lg mt-1 z-10">
+        <div class="slime-card p-1.5 sm:p-2 rounded-2xl">
+            <div class="text-[10px] sm:text-xs font-bold text-indigo-300 text-center mb-1">スライムの進化</div>
+            <div id="evolutionBar" class="flex justify-between items-center px-1 overflow-x-auto gap-1">
+                <!-- Javascript populates evolutions -->
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const SLIMES = [
+            { name: 'プチスライム', radius: 14, score: 2, color: '#38bdf8', darkColor: '#0284c7', face: 'normal' },
+            { name: 'ポイズンスライム', radius: 20, score: 4, color: '#a855f7', darkColor: '#7e22ce', face: 'grin' },
+            { name: 'ライムスライム', radius: 27, score: 6, color: '#4ade80', darkColor: '#15803d', face: 'happy' },
+            { name: 'チェリースライム', radius: 34, score: 8, color: '#f43f5e', darkColor: '#be123c', face: 'wink' },
+            { name: 'ハニースライム', radius: 42, score: 10, color: '#fbbf24', darkColor: '#b45309', face: 'star' },
+            { name: 'バブルスライム', radius: 50, score: 12, color: '#2dd4bf', darkColor: '#0f766e', face: 'sleepy' },
+            { name: 'マグマスライム', radius: 58, score: 14, color: '#f97316', darkColor: '#c2410c', face: 'fiery' },
+            { name: 'ベリースライム', radius: 67, score: 16, color: '#ec4899', darkColor: '#be185d', face: 'cute' },
+            { name: 'メタルスライム', radius: 76, score: 18, color: '#94a3b8', darkColor: '#475569', face: 'cool' },
+            { name: 'ゴールドスライム', radius: 86, score: 20, color: '#facc15', darkColor: '#ca8a04', face: 'rich' },
+            { name: 'キングスライム', radius: 97, score: 22, color: '#6366f1', darkColor: '#3730a3', face: 'king', crown: true },
+            { name: 'エンペラースライム', radius: 108, score: 25, color: '#312e81', darkColor: '#1e1b4b', face: 'emperor', cape: true, sparkles: true },
+            { name: 'おじゃまスライム', radius: 34, score: 0, color: '#64748b', darkColor: '#334155', face: 'ojama', isObstacle: true }
+        ];
+
+        class SlimeSoundSystem {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playSquish() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.12);
+                
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+
+            playMerge(level) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const baseFreq = 220 + level * 35;
+                
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(baseFreq * 0.7, now);
+                osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.8, now + 0.15);
+                
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.15);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.15);
+            }
+
+            playGameOver() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(40, now + 0.7);
+                
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.7);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.7);
+            }
+        }
+
+        const audio = new SlimeSoundSystem();
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const nextCanvas = document.getElementById('nextCanvas');
+        const nextCtx = nextCanvas.getContext('2d');
+
+        let engine, world;
+        let score = 0;
+        let currentMode = 'normal'; // 'normal' or 'hard'
+        let bestScore = parseInt(localStorage.getItem('slime_best_score_normal') || '0', 10);
+        let currentSlimeIndex = 0;
+        let nextSlimeIndex = 0;
+        let isDropping = false;
+        let dropX = 0;
+        let isGameOver = false;
+        let dangerTimer = 0;
+        let DANGER_LINE_Y = 80;
+        let stageLeft = 0;
+        let stageRight = 0;
+        let particles = [];
+        let slimeInstances = [];
+
+        // --- 15-Minute Time Limit Variables ---
+        const TIMER_DURATION_SEC = 15 * 60; // 15 mins = 900 secs
+        let timeRemaining = TIMER_DURATION_SEC;
+        let timerInterval = null;
+        let isTimerStarted = false; // 最初の落下検知フラグ
+
+        const scoreText = document.getElementById('scoreText');
+        const bestScoreText = document.getElementById('bestScoreText');
+        const timerText = document.getElementById('timerText');
+        const timerCard = document.getElementById('timerCard');
+
+        const gameOverModal = document.getElementById('gameOverModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalSubtext = document.getElementById('modalSubtext');
+        const modalIcon = document.getElementById('modalIcon');
+        const finalScore = document.getElementById('finalScore');
+        const dangerNotice = document.getElementById('dangerNotice');
+
+        const diffNormalBtn = document.getElementById('diffNormalBtn');
+        const diffHardBtn = document.getElementById('diffHardBtn');
+
+        bestScoreText.innerText = bestScore;
+
+        const { Engine, World, Bodies, Body, Composite, Events } = Matter;
+
+        function initPhysics() {
+            engine = Engine.create({
+                enableSleeping: false
+            });
+            world = engine.world;
+            applyModeSettings();
+            resizeCanvas();
+        }
+
+        function applyModeSettings() {
+            world.gravity.y = 1.3;
+            DANGER_LINE_Y = (currentMode === 'hard') ? 120 : 80;
+
+            bestScore = parseInt(localStorage.getItem(`slime_best_score_${currentMode}`) || '0', 10);
+            bestScoreText.innerText = bestScore;
+        }
+
+        function setDifficulty(mode) {
+            if (currentMode === mode) return;
+            currentMode = mode;
+
+            if (currentMode === 'hard') {
+                diffHardBtn.className = "px-2 py-0.5 rounded-xl bg-rose-600 text-white transition-all font-bold shadow";
+                diffNormalBtn.className = "px-2 py-0.5 rounded-xl text-indigo-300 hover:text-white transition-all";
+            } else {
+                diffNormalBtn.className = "px-2 py-0.5 rounded-xl bg-indigo-600 text-white transition-all font-bold shadow";
+                diffHardBtn.className = "px-2 py-0.5 rounded-xl text-indigo-300 hover:text-white transition-all";
+            }
+
+            applyModeSettings();
+            restartGame();
+        }
+
+        function resetTimerDisplay() {
+            stopTimer();
+            isTimerStarted = false;
+            timeRemaining = TIMER_DURATION_SEC;
+            updateTimerDisplay();
+        }
+
+        function startTimer() {
+            if (timerInterval || isGameOver) return;
+
+            timerInterval = setInterval(() => {
+                if (isGameOver) return;
+
+                timeRemaining--;
+                updateTimerDisplay();
+
+                if (timeRemaining <= 0) {
+                    stopTimer();
+                    triggerGameOver(true); // Time's up
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function updateTimerDisplay() {
+            const m = Math.floor(timeRemaining / 60);
+            const s = timeRemaining % 60;
+            timerText.innerText = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+
+            // 残り3分未満なら危険表示
+            if (timeRemaining <= 180) {
+                timerCard.classList.add('border-rose-500', 'bg-rose-950/40', 'animate-pulse');
+            } else {
+                timerCard.classList.remove('border-rose-500', 'bg-rose-950/40', 'animate-pulse');
+            }
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('gameContainer');
+            const rect = container.getBoundingClientRect();
+            
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+
+            // Hardモードの場合はステージの横幅を狭くする（左右に壁を寄せる）
+            if (currentMode === 'hard') {
+                const stageWidth = canvas.width * 0.75; // 横幅を75%に狭小化
+                stageLeft = (canvas.width - stageWidth) / 2;
+                stageRight = stageLeft + stageWidth;
+            } else {
+                stageLeft = 0;
+                stageRight = canvas.width;
+            }
+
+            if (world) {
+                const bodies = Composite.allBodies(world);
+                bodies.filter(b => b.isStatic).forEach(b => World.remove(world, b));
+
+                const wallThickness = 100;
+                
+                // 地面
+                const ground = Bodies.rectangle(
+                    canvas.width / 2, 
+                    canvas.height + wallThickness / 2 - 10, 
+                    canvas.width, 
+                    wallThickness, 
+                    { isStatic: true, friction: 0.8, restitution: 0.1 }
+                );
+
+                // 左壁
+                const leftWall = Bodies.rectangle(
+                    stageLeft - wallThickness / 2, 
+                    canvas.height / 2, 
+                    wallThickness, 
+                    canvas.height * 2, 
+                    { isStatic: true, friction: 0.8, restitution: 0.1 }
+                );
+
+                // 右壁
+                const rightWall = Bodies.rectangle(
+                    stageRight + wallThickness / 2, 
+                    canvas.height / 2, 
+                    wallThickness, 
+                    canvas.height * 2, 
+                    { isStatic: true, friction: 0.8, restitution: 0.1 }
+                );
+
+                World.add(world, [ground, leftWall, rightWall]);
+            }
+
+            dropX = (stageLeft + stageRight) / 2;
+        }
+
+        class SoftSlime {
+            constructor(x, y, level) {
+                this.level = level;
+                this.slimeData = SLIMES[level];
+                this.radius = this.slimeData.radius;
+                this.isMerging = false;
+
+                this.core = Bodies.circle(x, y, this.radius * 0.9, {
+                    friction: 0.15,
+                    frictionStatic: 0.2,
+                    restitution: 0.2,
+                    density: 0.0015,
+                    inertia: Infinity,
+                    frictionAir: 0.01
+                });
+                this.core.slimeInstance = this;
+
+                this.numPoints = Math.max(20, Math.floor(this.radius / 2.0));
+                this.points = [];
+                for (let i = 0; i < this.numPoints; i++) {
+                    const angle = (i / this.numPoints) * Math.PI * 2;
+                    this.points.push({ angle: angle, offset: 0, vel: 0 });
+                }
+
+                World.add(world, this.core);
+            }
+
+            update() {
+                const vel = this.core.velocity;
+                const pos = this.core.position;
+                const distanceToBottom = canvas.height - pos.y;
+                const isNearBottom = distanceToBottom < this.radius * 4.5;
+
+                for (let i = 0; i < this.numPoints; i++) {
+                    const p = this.points[i];
+                    const angle = p.angle;
+                    const sinVal = Math.sin(angle);
+                    const cosVal = Math.cos(angle);
+
+                    let targetOffset = sinVal * (this.radius * 0.2);
+
+                    if (isNearBottom && sinVal > 0.0) {
+                        const sagFactor = Math.max(0, 1 - (distanceToBottom / (this.radius * 4.5)));
+                        if (Math.abs(cosVal) < 0.75) {
+                            targetOffset += (this.radius * 0.95) * sagFactor;
+                        } else {
+                            targetOffset += (this.radius * 0.55) * sagFactor * Math.abs(cosVal);
+                        }
+                    }
+
+                    if (vel.y > 0.1) {
+                        if (sinVal > 0) targetOffset += vel.y * 0.75;
+                        else targetOffset -= vel.y * 0.35;
+                    }
+
+                    if (Math.abs(vel.x) > 0.2) {
+                        if (cosVal * vel.x > 0) targetOffset += Math.abs(vel.x) * 0.6;
+                    }
+
+                    const maxStretch = this.radius * 1.2;
+                    if (targetOffset > maxStretch) targetOffset = maxStretch;
+                    if (targetOffset < -maxStretch * 0.5) targetOffset = -maxStretch * 0.5;
+
+                    const force = (targetOffset - p.offset) * 0.35;
+                    p.vel = (p.vel + force) * 0.7;
+                    p.offset += p.vel;
+                }
+
+                if (this.slimeData.sparkles && Math.random() < 0.3) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * (this.radius * 1.1);
+                    particles.push({
+                        x: pos.x + Math.cos(angle) * dist,
+                        y: pos.y + Math.sin(angle) * dist,
+                        vx: (Math.random() - 0.5) * 1.2,
+                        vy: -Math.random() * 1.5 - 0.5,
+                        radius: Math.random() * 3.5 + 1.5,
+                        color: Math.random() < 0.5 ? '#e0e7ff' : '#fbbf24',
+                        alpha: 1,
+                        isGlitter: true,
+                        life: 1.0
+                    });
+                }
+
+                Body.setAngle(this.core, 0);
+                Body.setAngularVelocity(this.core, 0);
+            }
+
+            draw(ctx) {
+                const pos = this.core.position;
+                ctx.save();
+                ctx.translate(pos.x, pos.y);
+
+                if (this.slimeData.cape) {
+                    ctx.save();
+                    const cw = this.radius * 1.35;
+                    const ch = this.radius * 1.1;
+
+                    const capeGrad = ctx.createLinearGradient(-cw, -ch * 0.3, cw, ch);
+                    capeGrad.addColorStop(0, '#be123c');
+                    capeGrad.addColorStop(0.5, '#e11d48');
+                    capeGrad.addColorStop(1, '#881337');
+
+                    ctx.fillStyle = capeGrad;
+                    ctx.strokeStyle = '#f59e0b';
+                    ctx.lineWidth = Math.max(2.5, this.radius * 0.05);
+
+                    ctx.beginPath();
+                    ctx.moveTo(-this.radius * 0.5, -this.radius * 0.5);
+                    ctx.quadraticCurveTo(-cw * 1.1, -this.radius * 0.2, -cw, ch * 0.8);
+                    ctx.quadraticCurveTo(-cw * 0.5, ch * 0.95, -this.radius * 0.2, ch * 0.85);
+                    ctx.lineTo(-this.radius * 0.2, -this.radius * 0.3);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(this.radius * 0.5, -this.radius * 0.5);
+                    ctx.quadraticCurveTo(cw * 1.1, -this.radius * 0.2, cw, ch * 0.8);
+                    ctx.quadraticCurveTo(cw * 0.5, ch * 0.95, this.radius * 0.2, ch * 0.85);
+                    ctx.lineTo(this.radius * 0.2, -this.radius * 0.3);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#fef08a';
+                    ctx.beginPath();
+                    ctx.ellipse(0, -this.radius * 0.55, this.radius * 0.65, this.radius * 0.22, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#d97706';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+
+                    ctx.restore();
+                }
+
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+                ctx.shadowBlur = 10;
+                ctx.shadowOffsetY = 5;
+
+                ctx.beginPath();
+                const pointsArr = [];
+
+                for (let i = 0; i < this.numPoints; i++) {
+                    const p = this.points[i];
+                    const r = this.radius + p.offset;
+                    const px = Math.cos(p.angle) * r;
+                    const py = Math.sin(p.angle) * r;
+                    pointsArr.push({ x: px, y: py });
+                }
+
+                ctx.moveTo(
+                    (pointsArr[0].x + pointsArr[this.numPoints - 1].x) / 2,
+                    (pointsArr[0].y + pointsArr[this.numPoints - 1].y) / 2
+                );
+
+                for (let i = 0; i < this.numPoints; i++) {
+                    const nextP = pointsArr[(i + 1) % this.numPoints];
+                    const currP = pointsArr[i];
+                    const xc = (currP.x + nextP.x) / 2;
+                    const yc = (currP.y + nextP.y) / 2;
+                    ctx.quadraticCurveTo(currP.x, currP.y, xc, yc);
+                }
+                ctx.closePath();
+
+                ctx.fillStyle = this.slimeData.color;
+                ctx.fill();
+
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetY = 0;
+
+                ctx.lineWidth = Math.max(3, this.radius * 0.09);
+                ctx.strokeStyle = this.slimeData.darkColor;
+                ctx.stroke();
+
+                ctx.lineWidth = Math.max(1.2, this.radius * 0.035);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+                ctx.stroke();
+
+                ctx.save();
+                ctx.clip();
+                ctx.beginPath();
+                ctx.ellipse(-this.radius * 0.25, -this.radius * 0.4, this.radius * 0.38, this.radius * 0.16, -0.2, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.fill();
+                ctx.restore();
+
+                this.drawFace(ctx);
+
+                ctx.restore();
+            }
+
+            drawFace(ctx) {
+                const faceType = this.slimeData.face;
+                const r = this.radius;
+
+                ctx.fillStyle = '#0f172a';
+                ctx.strokeStyle = '#0f172a';
+
+                if (faceType === 'normal') {
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.3, -r * 0.05, r * 0.09, 0, Math.PI * 2);
+                    ctx.arc(r * 0.3, -r * 0.05, r * 0.09, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.lineWidth = Math.max(2, r * 0.06);
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.05, r * 0.22, 0.1 * Math.PI, 0.9 * Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'grin') {
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.3, -r * 0.08, r * 0.08, 0, Math.PI * 2);
+                    ctx.arc(r * 0.3, -r * 0.08, r * 0.08, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.lineWidth = Math.max(2, r * 0.06);
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.02, r * 0.28, 0.2 * Math.PI, 0.8 * Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'happy') {
+                    ctx.lineWidth = Math.max(2.5, r * 0.07);
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.3, -r * 0.05, r * 0.1, Math.PI, 0);
+                    ctx.arc(r * 0.3, -r * 0.05, r * 0.1, Math.PI, 0);
+                    ctx.stroke();
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.12, r * 0.12, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (faceType === 'wink') {
+                    ctx.lineWidth = Math.max(2.2, r * 0.065);
+                    ctx.beginPath();
+                    ctx.moveTo(-r * 0.4, -r * 0.12); ctx.lineTo(-r * 0.2, -r * 0.02); ctx.lineTo(-r * 0.4, r * 0.02);
+                    ctx.moveTo(r * 0.2, -r * 0.05); ctx.arc(r * 0.3, -r * 0.05, r * 0.08, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.lineWidth = Math.max(2, r * 0.055);
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.1, r * 0.18, 0, Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'star') {
+                    ctx.fillStyle = '#f59e0b';
+                    this.drawStar(ctx, -r * 0.3, -r * 0.05, r * 0.12);
+                    this.drawStar(ctx, r * 0.3, -r * 0.05, r * 0.12);
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.15, r * 0.14, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (faceType === 'sleepy') {
+                    ctx.lineWidth = Math.max(2.5, r * 0.07);
+                    ctx.beginPath();
+                    ctx.moveTo(-r * 0.4, -r * 0.05); ctx.lineTo(-r * 0.2, -r * 0.05);
+                    ctx.moveTo(r * 0.2, -r * 0.05); ctx.lineTo(r * 0.4, -r * 0.05);
+                    ctx.stroke();
+                    ctx.lineWidth = Math.max(2, r * 0.05);
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.12, r * 0.12, 0.2 * Math.PI, 1.8 * Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'fiery') {
+                    ctx.lineWidth = Math.max(2.5, r * 0.07);
+                    ctx.beginPath();
+                    ctx.moveTo(-r * 0.4, -r * 0.12); ctx.lineTo(-r * 0.15, -r * 0.05);
+                    ctx.moveTo(r * 0.4, -r * 0.12); ctx.lineTo(r * 0.15, -r * 0.05);
+                    ctx.stroke();
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.rect(-r * 0.15, r * 0.05, r * 0.3, r * 0.12);
+                    ctx.fill();
+                } else if (faceType === 'cute') {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.3, -r * 0.05, r * 0.08, 0, Math.PI * 2);
+                    ctx.arc(r * 0.3, -r * 0.05, r * 0.08, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = 'rgba(244, 63, 94, 0.5)';
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.35, r * 0.05, r * 0.1, 0, Math.PI * 2);
+                    ctx.arc(r * 0.35, r * 0.05, r * 0.1, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.lineWidth = Math.max(2, r * 0.05);
+                    ctx.beginPath();
+                    ctx.moveTo(-r * 0.08, r * 0.06); ctx.lineTo(0, r * 0.14); ctx.lineTo(r * 0.08, r * 0.06);
+                    ctx.stroke();
+                } else if (faceType === 'cool') {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(-r * 0.48, -r * 0.15, r * 0.38, r * 0.22);
+                    ctx.fillRect(r * 0.1, -r * 0.15, r * 0.38, r * 0.22);
+                    ctx.fillRect(-r * 0.12, -r * 0.08, r * 0.24, r * 0.06);
+                    ctx.lineWidth = Math.max(2, r * 0.05);
+                    ctx.beginPath();
+                    ctx.arc(r * 0.05, r * 0.12, r * 0.15, 0.1 * Math.PI, 0.7 * Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'rich') {
+                    ctx.fillStyle = '#b45309';
+                    ctx.font = `bold ${Math.floor(r * 0.3)}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('$', -r * 0.3, -r * 0.05);
+                    ctx.fillText('$', r * 0.3, -r * 0.05);
+                    ctx.lineWidth = Math.max(2, r * 0.05);
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.08, r * 0.2, 0, Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'king') {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.28, -r * 0.05, r * 0.09, 0, Math.PI * 2);
+                    ctx.arc(r * 0.28, -r * 0.05, r * 0.09, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.lineWidth = Math.max(2.2, r * 0.06);
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.1, r * 0.22, 0.1 * Math.PI, 0.9 * Math.PI);
+                    ctx.stroke();
+                } else if (faceType === 'emperor') {
+                    ctx.fillStyle = '#facc15';
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.28, -r * 0.05, r * 0.1, 0, Math.PI * 2);
+                    ctx.arc(r * 0.28, -r * 0.05, r * 0.1, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.28, -r * 0.05, r * 0.05, 0, Math.PI * 2);
+                    ctx.arc(r * 0.28, -r * 0.05, r * 0.05, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.lineWidth = Math.max(2.5, r * 0.06);
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.1, r * 0.25, 0.1 * Math.PI, 0.9 * Math.PI);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(-r * 0.4, -r * 0.18); ctx.lineTo(-r * 0.18, -r * 0.15);
+                    ctx.moveTo(r * 0.4, -r * 0.18); ctx.lineTo(r * 0.18, -r * 0.15);
+                    ctx.stroke();
+                } else if (faceType === 'ojama') {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(-r * 0.3, -r * 0.08, r * 0.08, 0, Math.PI * 2);
+                    ctx.arc(r * 0.3, -r * 0.08, r * 0.08, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.lineWidth = Math.max(2, r * 0.05);
+                    ctx.beginPath();
+                    ctx.moveTo(-r * 0.45, -r * 0.22); ctx.lineTo(-r * 0.15, -r * 0.15);
+                    ctx.moveTo(r * 0.45, -r * 0.22); ctx.lineTo(r * 0.15, -r * 0.15);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.arc(0, r * 0.18, r * 0.15, 1.1 * Math.PI, 1.9 * Math.PI);
+                    ctx.stroke();
+                }
+
+                if (this.slimeData.crown || this.slimeData.cape) {
+                    const isEmp = !!this.slimeData.cape;
+                    ctx.fillStyle = isEmp ? '#fbbf24' : '#facc15';
+                    ctx.strokeStyle = isEmp ? '#b45309' : '#ca8a04';
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    const cw = r * (isEmp ? 0.55 : 0.45);
+                    const ch = r * (isEmp ? 0.42 : 0.35);
+                    const cy = -r * (isEmp ? 0.88 : 0.85);
+                    ctx.moveTo(-cw, cy);
+                    ctx.lineTo(-cw, cy - ch);
+                    ctx.lineTo(-cw * 0.5, cy - ch * 0.5);
+                    ctx.lineTo(0, cy - ch * 1.3);
+                    ctx.lineTo(cw * 0.5, cy - ch * 0.5);
+                    ctx.lineTo(cw, cy - ch);
+                    ctx.lineTo(cw, cy);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+
+                    if (isEmp) {
+                        ctx.fillStyle = '#f43f5e';
+                        ctx.beginPath();
+                        ctx.arc(0, cy - ch * 0.5, r * 0.08, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            drawStar(ctx, cx, cy, radius) {
+                ctx.beginPath();
+                for (let i = 0; i < 5; i++) {
+                    ctx.lineTo(cx + Math.cos((18 + i * 72) * Math.PI / 180) * radius, cy - Math.sin((18 + i * 72) * Math.PI / 180) * radius);
+                    ctx.lineTo(cx + Math.cos((54 + i * 72) * Math.PI / 180) * (radius * 0.5), cy - Math.sin((54 + i * 72) * Math.PI / 180) * (radius * 0.5));
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            destroy() {
+                World.remove(world, this.core);
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += p.isGlitter ? 0.02 : 0.15;
+                p.alpha -= p.isGlitter ? 0.025 : 0.03;
+                if (p.alpha <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        function createSlimeSplatter(x, y, color) {
+            for (let i = 0; i < 14; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 5 + 1.5;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: Math.random() * 4 + 2,
+                    color: color,
+                    alpha: 1,
+                    isGlitter: false,
+                    life: 1.0
+                });
+            }
+        }
+
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, p.alpha);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function setupCollisions() {
+            Events.on(engine, 'collisionStart', (event) => {
+                const pairs = event.pairs;
+
+                for (let i = 0; i < pairs.length; i++) {
+                    const pair = pairs[i];
+                    const slimeA = pair.bodyA.slimeInstance;
+                    const slimeB = pair.bodyB.slimeInstance;
+
+                    if (slimeA && slimeB) {
+                        if (slimeA.slimeData.isObstacle || slimeB.slimeData.isObstacle) {
+                            continue;
+                        }
+
+                        if (slimeA.level === slimeB.level && !slimeA.isMerging && !slimeB.isMerging) {
+                            const level = slimeA.level;
+
+                            slimeA.isMerging = true;
+                            slimeB.isMerging = true;
+
+                            const midX = (slimeA.core.position.x + slimeB.core.position.x) / 2;
+                            const midY = (slimeA.core.position.y + slimeB.core.position.y) / 2;
+
+                            removeSlime(slimeA);
+                            removeSlime(slimeB);
+
+                            addScore(SLIMES[level].score);
+                            audio.playMerge(level);
+
+                            if (level + 1 < 12) {
+                                spawnSlime(midX, midY, level + 1, false);
+                                createSlimeSplatter(midX, midY, SLIMES[level + 1].color);
+                            } else {
+                                createSlimeSplatter(midX, midY, '#312e81');
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function spawnSlime(x, y, level, isUserDrop = false) {
+            const slime = new SoftSlime(x, y, level);
+            slimeInstances.push(slime);
+
+            if (isUserDrop) {
+                audio.playSquish();
+            }
+            return slime;
+        }
+
+        function removeSlime(slime) {
+            slime.destroy();
+            const idx = slimeInstances.indexOf(slime);
+            if (idx !== -1) {
+                slimeInstances.splice(idx, 1);
+            }
+        }
+
+        function getRandomSlimeIndex() {
+            if (currentMode === 'hard') {
+                if (Math.random() < 0.02) {
+                    return 12; // おじゃまスライム (2%)
+                }
+                return Math.floor(Math.random() * 5);
+            } else {
+                return Math.floor(Math.random() * 5);
+            }
+        }
+
+        function prepareNextSlime() {
+            currentSlimeIndex = nextSlimeIndex;
+            nextSlimeIndex = getRandomSlimeIndex();
+            drawNextSlime();
+        }
+
+        function drawNextSlime() {
+            nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+            const slimeData = SLIMES[nextSlimeIndex];
+            const tempSlime = new SoftSlime(20, 20, nextSlimeIndex);
+            
+            const scale = Math.min(16 / slimeData.radius, 1);
+            nextCtx.save();
+            nextCtx.scale(scale, scale);
+            tempSlime.draw(nextCtx);
+            nextCtx.restore();
+            tempSlime.destroy();
+        }
+
+        function handlePointerMove(e) {
+            if (isDropping || isGameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const x = clientX - rect.left;
+
+            const radius = SLIMES[currentSlimeIndex].radius;
+            // 壁の内側に収まるよう制限
+            dropX = Math.max(stageLeft + radius + 5, Math.min(stageRight - radius - 5, x));
+        }
+
+        function handlePointerDrop() {
+            if (isDropping || isGameOver) return;
+
+            // 最初のスライム落下時にタイマーを開始
+            if (!isTimerStarted) {
+                isTimerStarted = true;
+                startTimer();
+            }
+
+            isDropping = true;
+
+            spawnSlime(dropX, DANGER_LINE_Y, currentSlimeIndex, true);
+
+            setTimeout(() => {
+                prepareNextSlime();
+                isDropping = false;
+            }, 550);
+        }
+
+        function checkGameOverCondition() {
+            let inDanger = false;
+
+            for (let slime of slimeInstances) {
+                const pos = slime.core.position;
+                if (pos.y - slime.radius < DANGER_LINE_Y && Math.abs(slime.core.velocity.y) < 0.2) {
+                    inDanger = true;
+                    break;
+                }
+            }
+
+            if (inDanger) {
+                dangerTimer += 1 / 60;
+                dangerNotice.classList.remove('hidden');
+                if (dangerTimer > 1.8) {
+                    triggerGameOver(false);
+                }
+            } else {
+                dangerTimer = Math.max(0, dangerTimer - 1 / 60);
+                dangerNotice.classList.add('hidden');
+            }
+        }
+
+        function triggerGameOver(isTimeUp = false) {
+            if (isGameOver) return;
+            isGameOver = true;
+            stopTimer();
+            audio.playGameOver();
+
+            if (isTimeUp) {
+                modalIcon.innerText = '⏰';
+                modalTitle.innerText = 'タイムアップ！';
+                modalSubtext.innerText = '制限時間の15分が経過しました！';
+            } else {
+                modalIcon.innerText = '🫠';
+                modalTitle.innerText = 'ゲームオーバー';
+                modalSubtext.innerText = 'スライムがあふれ出しました！';
+            }
+
+            finalScore.innerText = score;
+            gameOverModal.classList.remove('hidden');
+        }
+
+        function addScore(points) {
+            score += points;
+            scoreText.innerText = score;
+            if (score > bestScore) {
+                bestScore = score;
+                bestScoreText.innerText = bestScore;
+                localStorage.setItem(`slime_best_score_${currentMode}`, bestScore);
+            }
+        }
+
+        function renderLoop() {
+            Engine.update(engine, 1000 / 60);
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Hardモード時の狭窄ステージ（左右の壁）の描画
+            if (currentMode === 'hard') {
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+                ctx.fillRect(0, 0, stageLeft, canvas.height);
+                ctx.fillRect(stageRight, 0, canvas.width - stageRight, canvas.height);
+
+                ctx.strokeStyle = '#f43f5e';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(stageLeft, 0); ctx.lineTo(stageLeft, canvas.height);
+                ctx.moveTo(stageRight, 0); ctx.lineTo(stageRight, canvas.height);
+                ctx.stroke();
+            }
+
+            // 危険ライン描画
+            ctx.save();
+            ctx.setLineDash([6, 6]);
+            ctx.strokeStyle = dangerTimer > 0 ? '#f43f5e' : 'rgba(244, 63, 94, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(stageLeft, DANGER_LINE_Y);
+            ctx.lineTo(stageRight, DANGER_LINE_Y);
+            ctx.stroke();
+            ctx.restore();
+
+            const sortedSlimes = [...slimeInstances].sort((a, b) => {
+                return b.radius - a.radius;
+            });
+
+            sortedSlimes.forEach(slime => {
+                slime.update();
+                slime.draw(ctx);
+            });
+
+            if (!isDropping && !isGameOver) {
+                ctx.save();
+                ctx.globalAlpha = 0.85;
+
+                ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(dropX, DANGER_LINE_Y);
+                ctx.lineTo(dropX, canvas.height);
+                ctx.stroke();
+
+                const tempSlime = new SoftSlime(dropX, DANGER_LINE_Y, currentSlimeIndex);
+                tempSlime.draw(ctx);
+                tempSlime.destroy();
+
+                ctx.restore();
+            }
+
+            updateParticles();
+            drawParticles();
+
+            if (!isGameOver) {
+                checkGameOverCondition();
+            }
+
+            requestAnimationFrame(renderLoop);
+        }
+
+        function initEvolutionBar() {
+            const bar = document.getElementById('evolutionBar');
+            bar.innerHTML = '';
+            for (let idx = 0; idx < 12; idx++) {
+                const slime = SLIMES[idx];
+                const item = document.createElement('div');
+                item.className = 'flex flex-col items-center flex-shrink-0 cursor-default';
+                
+                const miniCanvas = document.createElement('canvas');
+                miniCanvas.width = 24;
+                miniCanvas.height = 24;
+                const mCtx = miniCanvas.getContext('2d');
+                
+                const tempSlime = new SoftSlime(12, 12, idx);
+                const scale = Math.min(10 / slime.radius, 1);
+                mCtx.scale(scale, scale);
+                tempSlime.draw(mCtx);
+                tempSlime.destroy();
+
+                item.appendChild(miniCanvas);
+                bar.appendChild(item);
+
+                if (idx < 11) {
+                    const arrow = document.createElement('span');
+                    arrow.className = 'text-[9px] text-indigo-400 font-bold self-center';
+                    arrow.innerText = '›';
+                    bar.appendChild(arrow);
+                }
+            }
+        }
+
+        function restartGame() {
+            [...slimeInstances].forEach(slime => removeSlime(slime));
+
+            score = 0;
+            scoreText.innerText = '0';
+            isGameOver = false;
+            isDropping = false;
+            dangerTimer = 0;
+            dangerNotice.classList.add('hidden');
+            gameOverModal.classList.add('hidden');
+
+            resizeCanvas();
+            resetTimerDisplay();
+
+            nextSlimeIndex = getRandomSlimeIndex();
+            prepareNextSlime();
+        }
+
+        window.onload = () => {
+            lucide.createIcons();
+            audio.init();
+            initPhysics();
+            setupCollisions();
+            initEvolutionBar();
+
+            nextSlimeIndex = getRandomSlimeIndex();
+            prepareNextSlime();
+            resetTimerDisplay();
+
+            window.addEventListener('resize', resizeCanvas);
+
+            canvas.addEventListener('mousemove', handlePointerMove);
+            canvas.addEventListener('touchmove', (e) => { handlePointerMove(e); e.preventDefault(); }, { passive: false });
+            
+            canvas.addEventListener('click', () => { audio.init(); handlePointerDrop(); });
+            canvas.addEventListener('touchend', () => { audio.init(); handlePointerDrop(); });
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft') {
+                    const radius = SLIMES[currentSlimeIndex].radius;
+                    dropX = Math.max(stageLeft + radius + 5, dropX - 20);
+                } else if (e.key === 'ArrowRight') {
+                    const radius = SLIMES[currentSlimeIndex].radius;
+                    dropX = Math.min(stageRight - radius - 5, dropX + 20);
+                } else if (e.key === ' ' || e.key === 'ArrowDown') {
+                    handlePointerDrop();
+                }
+            });
+
+            document.getElementById('restartBtn').addEventListener('click', restartGame);
+            document.getElementById('modalRestartBtn').addEventListener('click', restartGame);
+
+            diffNormalBtn.addEventListener('click', () => setDifficulty('normal'));
+            diffHardBtn.addEventListener('click', () => setDifficulty('hard'));
+
+            renderLoop();
+        };
+    </script>
+</body>
+</html>
